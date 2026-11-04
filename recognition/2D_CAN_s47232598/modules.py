@@ -66,7 +66,7 @@ class Up(nn.Module):
 
 
 #♥=========== 2D U-Net (baseline model) ===========♥#
-class Unet2D(nn.Module):
+class UNet2D(nn.Module):
     """
     Standard 2D U-Net (Ronneberger et al., 2015) with 4 down/up-sampling stages.
 
