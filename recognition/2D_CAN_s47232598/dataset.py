@@ -186,6 +186,9 @@ def preprocess_image(image, mask, image_size=(256, 256)):
 
     return image, mask
 
+# Note: Augmentation functionality added for the future, however currently disabled by default as research will
+#       research needs to be conducted to ensure augmentation does not invalidate the data (eg, some brain stuff
+#       might be anatomically invalidated when horizontally flipped)
 def augment_image(image, mask):
     """
     Applies identical spatial transformations to image and mask
@@ -251,7 +254,10 @@ class OASISDataset(Dataset):
             mask = (mask > 0).astype(np.float32)
             mask = torch.from_numpy(mask).unsqueeze(0)
         elif self.mask_mode == "multiclass":
-            mask = torch.from_numpy(mask.astype(np.int64))
+            mask = mask.astype(np.int64)
+            if mask.max() > 3:
+                mask = np.round(mask / 85).astype(np.int64)
+            mask = torch.from_numpy(mask)
 
         else:
             raise ValueError(f"mask_mode must be 'binary' or 'multiclass'")
@@ -263,12 +269,12 @@ class OASISDataset(Dataset):
 
 def create_dataloaders(train_pairs, val_pairs, test_pairs, batch_size=8,
                        image_size=(256, 256), mask_mode="binary"):
-    train_dataset = OASISDataset(train_pairs, image_size, augment=True, mask_mode=mask_mode)
+    train_dataset = OASISDataset(train_pairs, image_size, augment=False, mask_mode=mask_mode)
     val_dataset = OASISDataset(val_pairs, image_size, augment=False, mask_mode=mask_mode)
     test_dataset = OASISDataset(test_pairs, image_size, augment=False, mask_mode=mask_mode)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     return train_loader, val_loader, test_loader
