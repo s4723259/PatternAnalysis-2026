@@ -5,14 +5,17 @@
 # Note: Make sure to plot the losses and metrics during training
 
 #♥=========== Imports ===========♥#
+import random
 import time
 from pathlib import Path
 
 import torch
+import torch.optim as optim
 import matplotlib.pyplot as plt
 
 from dataset import create_image_mask_pairs, split_by_subject, create_dataloaders, IMAGE_SIZE
-from utils import confusion_stats, dice_iou_from_stats
+from modules import UNet2D
+from utils import CombinedLoss, confusion_stats, dice_iou_from_stats
 
 #♥=========== Configuration ===========♥#
 ROOT = Path(__file__).resolve().parent / "keras_png_slices_data" # Dataset directory
@@ -83,7 +86,7 @@ def evaluate(model, loader, criterion, device):
 
         batch_tp, batch_fp, batch_fn = confusion_stats(logits, masks, NUM_CLASSES)
         tp += batch_tp
-        fp += batch_fn
+        fp += batch_fp
         fn += batch_fn
 
     dice, iou = dice_iou_from_stats(tp, fp, fn)
@@ -142,3 +145,81 @@ def plot_history(history, save_path):
     plt.close(fig)
     print(f"Saved training curves to {save_path}")
 
+
+#♥=========== Main ===========♥#
+def main():
+    random.seed(RANDOM_SEED)
+    torch.manual_seed(RANDOM_SEED)
+
+    device = get_device()
+    print(f"Using device: {device}")
+
+    train_loader, val_loader, test_loader = load_data()
+
+    # Check output dimensions
+    images, masks = next(iter(train_loader))
+    print("\nDataLoader Verification")
+    print("♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥")
+    print("Image batch shape:", images.shape)  # expect (B, 1, 256, 256)
+    print("Mask batch shape:", masks.shape)    # expect (B, 256, 256)
+    print("Mask labels present:", masks.unique().tolist())  # expect a subset of [0, 1, 2, 3]
+
+    model = UNet2D(in_channels=1, num_classes=NUM_CLASSES, base_channels=64).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {n_params / 1e6:.1f}M")
+
+    criterion = CombinedLoss(NUM_CLASSES)
+    optimiser = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, mode="min", factor=0.5, patience=5)
+
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+
+    history = {"train_loss": [], "val_loss": [], "val_mean_dice": [], "val_dice_per_class": []}
+    best_val_dice = 0.0
+    training_start = time.time()
+
+    #♥===== Training loop =====♥#
+    for epoch in range(1, EPOCHS + 1):
+        train_loss = train_one_epoch(model, train_loader, criterion, optimiser, device)
+        val_loss, val_dice, _ = evaluate(model, val_loader, criterion, device)
+        scheduler.step(val_loss)
+
+        mean_fg_dice = val_dice[1:].mean().item()
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        history["val_mean_dice"].append(mean_fg_dice)
+        history["val_dice_per_class"].append(val_dice.tolist())
+
+        print(f"Epoch {epoch:02d}/{EPOCHS} | train loss {train_loss:.4f} | val loss {val_loss:.4f} | "
+              f"val mean Dice {mean_fg_dice:.4f} | lr {optimiser.param_groups[0]['lr']:.1e}")
+
+        # Save the best model (by validation dice)
+        if mean_fg_dice > best_val_dice:
+            best_val_dice = mean_fg_dice
+            torch.save(model.state_dict(), CHECKPOINT_PATH)
+            print(f"\nnew best model saved (val Dice {best_val_dice:.4f})")
+
+    print(f"\nTraining finished in {(time.time() - training_start) / 60:.1f} minutes")
+    plot_history(history, CURVES_PATH)
+
+    #♥===== Testing =====♥#
+    model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+    test_loss, test_dice, test_iou = evaluate(model, test_loader, criterion, device)
+
+    print("\nTest Results (best checkpoint)")
+    print("♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥")
+    print(f"Test loss: {test_loss:.4f}")
+    print(f"{'Class':<14}{'Dice':>8}{'IoU':>8}")
+    for c in range(NUM_CLASSES):
+        print(f"{CLASS_NAMES[c]:<14}{test_dice[c].item():>8.4f}{test_iou[c].item():>8.4f}")
+    print(f"{'Mean (fg)':<14}{test_dice[1:].mean().item():>8.4f}{test_iou[1:].mean().item():>8.4f}")
+
+    #♥===== Profiling =====♥#
+    ms_per_slice = measure_inference_time(model, test_loader, device)
+    print(f"Inference time: {ms_per_slice:.2f} ms / slice")
+    if device.type == "cuda":
+        print(f"Peak GPU memory: {torch.cuda.max_memory_allocated() / 1024 ** 2:.0f} MB")
+
+if __name__ == "__main__":
+    main()
