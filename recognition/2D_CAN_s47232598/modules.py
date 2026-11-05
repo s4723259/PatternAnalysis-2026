@@ -114,15 +114,24 @@ class UNet2D(nn.Module):
 
 
 #♥=========== Multi-scale Context Aggregation Network (CAN) ===========♥#
-# TODO: Add comment here with reference, little explainer of everything
+# Reference: Yu & Koltun (2016), "Multi-Scale Context Aggregation by Dilated Convolutions", ICLR.
+#
+#   CAN2D =  FrontEnd  ->  ContextModule  ->  1x1 classifier  ->  bilinear upsampling
+#
+#   FrontEnd      : small VGG-style network with only two poolings, so its output is 1/4 resolution
+#                   (64x64 for a 256x256 slice). Later convolutions are dilated instead of pooled (Section 4).
+#   ContextModule : the paper's context module (Table 1). 7 x (3x3 conv + ReLU) with dilations
+#                   1, 1, 2, 4, 8, 16, 1, then a 1x1 conv. No pooling anywhere, so no loss of resolution.
+#                   Initialised as an identity mapping (Eq. 4 / 5).
+#   classifier    : 1x1 conv, C context feature maps -> class logits
 
 def conv_bn_relu(in_channels, out_channels, kernel_size=3, dilation=1):
-    """Conv - BN - ReLU as a list of layers. 'Same' padding, so H and W are unchanged"""
+    """Conv - BN - ReLU as a list of layers. 'Same' padding, so H and W are unchanged."""
     padding = dilation * (kernel_size // 2)
     return [
         nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding, dilation=dilation, bias=False),
         nn.BatchNorm2d(out_channels),
-        nn.ReLU(inplace=True)
+        nn.ReLU(inplace=True),
     ]
 
 @torch.no_grad()
@@ -301,9 +310,7 @@ class CAN2D(nn.Module):
 def build_model(arch, num_classes=4, context="large"):
     """
     :param arch: 'unet' or 'can'
-    :param num_classes:
-    :param context: only used by can: 'none', 'basic' or 'large'
-    :return:
+    :param context: only used by 'can': 'none', 'basic' or 'large'
     """
     if arch == "unet":
         return UNet2D(in_channels=1, num_classes=num_classes, base_channels=64)

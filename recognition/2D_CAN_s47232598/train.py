@@ -11,18 +11,18 @@
 #                   --init-from best_can_none.pth --freeze-frontend     # CAN stage 2: context module
 
 #♥=========== Imports ===========♥#
+import argparse
+import json
 import random
 import time
 from pathlib import Path
-import json
-import argparse
 
 import torch
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
 from dataset import create_image_mask_pairs, split_by_subject, create_dataloaders, IMAGE_SIZE
-from modules import UNet2D, build_model
+from modules import build_model
 from utils import CombinedLoss, confusion_stats, dice_iou_from_stats
 
 #♥=========== Configuration ===========♥#
@@ -241,7 +241,7 @@ def main():
     print(f"Model parameters: {n_params / 1e6:.2f}M ({n_trainable / 1e6:.2f}M trainable)")
 
     criterion = CombinedLoss(NUM_CLASSES)
-    optimiser = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimiser = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=args.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, mode="min", factor=0.5, patience=5)
 
     if device.type == "cuda":
@@ -263,7 +263,7 @@ def main():
         history["val_mean_dice"].append(mean_fg_dice)
         history["val_dice_per_class"].append(val_dice.tolist())
 
-        print(f"Epoch {epoch:02d}/{EPOCHS} | train loss {train_loss:.4f} | val loss {val_loss:.4f} | "
+        print(f"Epoch {epoch:02d}/{args.epochs} | train loss {train_loss:.4f} | val loss {val_loss:.4f} | "
               f"val mean Dice {mean_fg_dice:.4f} | lr {optimiser.param_groups[0]['lr']:.1e}")
 
         # Save the best model (by validation dice)
@@ -287,50 +287,50 @@ def main():
         torch.cuda.reset_peak_memory_stats()
 
     #♥===== Testing =====♥#
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        test_loss, test_dice, test_iou = evaluate(model, test_loader, criterion, device)
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    test_loss, test_dice, test_iou = evaluate(model, test_loader, criterion, device)
 
-        print("\nTest Results (best checkpoint)")
-        print("♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥")
-        print(f"Test loss: {test_loss:.4f}")
-        print(f"{'Class':<14}{'Dice':>8}{'IoU':>8}")
-        for c in range(NUM_CLASSES):
-            print(f"{CLASS_NAMES[c]:<14}{test_dice[c].item():>8.4f}{test_iou[c].item():>8.4f}")
-        print(f"{'Mean (fg)':<14}{test_dice[1:].mean().item():>8.4f}{test_iou[1:].mean().item():>8.4f}")
+    print("\nTest Results (best checkpoint)")
+    print("♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥")
+    print(f"Test loss: {test_loss:.4f}")
+    print(f"{'Class':<14}{'Dice':>8}{'IoU':>8}")
+    for c in range(NUM_CLASSES):
+        print(f"{CLASS_NAMES[c]:<14}{test_dice[c].item():>8.4f}{test_iou[c].item():>8.4f}")
+    print(f"{'Mean (fg)':<14}{test_dice[1:].mean().item():>8.4f}{test_iou[1:].mean().item():>8.4f}")
 
-        # ♥===== Profiling =====♥#
-        ms_per_slice = measure_inference_time(model, test_loader, device)
-        print(f"Inference time: {ms_per_slice:.2f} ms / slice (batch size {BATCH_SIZE})")
-        peak_infer_mb = None
-        if device.type == "cuda":
-            peak_infer_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
-            print(f"Peak GPU memory: {peak_train_mb:.0f} MB training | {peak_infer_mb:.0f} MB inference")
-        gflops = count_gflops(model, device)
-        if gflops is not None:
-            print(f"Forward cost: {gflops:.1f} GFLOPs / slice")
+    #♥===== Profiling =====♥#
+    ms_per_slice = measure_inference_time(model, test_loader, device)
+    print(f"Inference time: {ms_per_slice:.2f} ms / slice (batch size {BATCH_SIZE})")
+    peak_infer_mb = None
+    if device.type == "cuda":
+        peak_infer_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
+        print(f"Peak GPU memory: {peak_train_mb:.0f} MB training | {peak_infer_mb:.0f} MB inference")
+    gflops = count_gflops(model, device)
+    if gflops is not None:
+        print(f"Forward cost: {gflops:.1f} GFLOPs / slice")
 
-        # Everything needed to compare runs in the report
-        results = {
-            "run": run_name,
-            "args": {k: str(v) for k, v in vars(args).items()},
-            "params_total": n_params,
-            "params_trainable": n_trainable,
-            "train_minutes": train_minutes,
-            "best_val_mean_dice": best_val_dice,
-            "test_loss": test_loss,
-            "test_dice": test_dice.tolist(),
-            "test_iou": test_iou.tolist(),
-            "test_mean_fg_dice": test_dice[1:].mean().item(),
-            "test_mean_fg_iou": test_iou[1:].mean().item(),
-            "ms_per_slice": ms_per_slice,
-            "peak_train_mb": peak_train_mb,
-            "peak_infer_mb": peak_infer_mb,
-            "gflops_per_slice": gflops,
-            "history": history,
-        }
-        with open(results_path, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Saved results to {results_path}")
+    # Everything needed to compare runs in the report
+    results = {
+        "run": run_name,
+        "args": {k: str(v) for k, v in vars(args).items()},
+        "params_total": n_params,
+        "params_trainable": n_trainable,
+        "train_minutes": train_minutes,
+        "best_val_mean_dice": best_val_dice,
+        "test_loss": test_loss,
+        "test_dice": test_dice.tolist(),
+        "test_iou": test_iou.tolist(),
+        "test_mean_fg_dice": test_dice[1:].mean().item(),
+        "test_mean_fg_iou": test_iou[1:].mean().item(),
+        "ms_per_slice": ms_per_slice,
+        "peak_train_mb": peak_train_mb,
+        "peak_infer_mb": peak_infer_mb,
+        "gflops_per_slice": gflops,
+        "history": history,
+    }
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Saved results to {results_path}")
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
