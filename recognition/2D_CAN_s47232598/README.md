@@ -38,5 +38,13 @@ meow, mrow mrow
 
 
 ## Artificial Intelligence Usage Disclosure
-No AI models were used in the creation of this project, meow.
+An AI model was used in predict.py, specifically lines 398 to 522. Claude AI was used on 6/11/26 with this prompt:
+> Hi Claude, I need help using matplotlib for generating figures of relevant results for a machine learning assignment. Can you please review my code and provide code for plotting figures? I'm specifically looking for ones that plot failure cases, slice positions and global dice vs boundary dice
+
+The code was audited, verified and empirically tested by first line by line inspection, then inspection of the produced results against the known figures
+
+An AI model was used in predict.py, specifically lines to 394. Claude AI was used on 6/11/26 with this prompt:  
+> Hi Claude, I need some help with creating a python file that analyses some machine learning models. Here is the code I have written for returning the relevant metrics. Can you please create some code that outputs the results of these to the console with print() in a user friendly way?  
+  
+The code was audited, verified and empirically tested by line by line inspection, then inspection of the produced results against the known figures (from my first attempt at console output).
  
