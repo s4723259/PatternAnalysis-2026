@@ -129,13 +129,11 @@ Both models are scored on the same held-out test split. Dice and IoU are pooled 
 
 | Model | Parameters (trainable) | GFLOPs / slice | Inference latency (ms / slice) | Peak VRAM, inference | Peak VRAM, training | Training time |
 |---|---|---|---|---|---|---|
-| 2D U-Net (baseline) | 31.04 M (31.04 M)‡ | 96.2‡ | **TODO** | **TODO** | **TODO** | **TODO** |
+| 2D U-Net (baseline) | 31.04 M (31.04 M)‡ | 96.2‡ | 8.54 | not recorded | 3,241 MB | 129.4 min |
 | CAN, front end only | 3.69 M (3.69 M) | 32.7 | 2.82 | 156 MB | 1,063 MB | 51.1 min |
 | CAN, large context | 7.64 M (3.95 M) | 65.0 | 4.93 | 247 MB | 658 MB | 34.2 min (stage 2 only; 85.3 min for both stages) |
 
 Latency is the forward pass only (batch size 8, data loading excluded, first batch discarded as warm-up, CUDA-synchronised). Peak VRAM is `torch.cuda.max_memory_allocated`, i.e. what PyTorch's allocator used, which is lower than what `nvidia-smi` shows. Training peak includes weights, gradients, optimiser state and activations. Stage 2 peaks lower than stage 1 because the frozen front end needs no gradients, optimiser state or stored activations. Both stages take about 1.7 min per epoch.
-
-‡ `results_unet2d.json` was not available, so the U-Net's parameter count and FLOPs were derived analytically from `modules.py`. The same counting method reproduces the CAN's recorded values exactly (3,685,892 and 7,635,476 parameters; 32.7 and 65.0 GFLOPs), so these two numbers are reliable. The U-Net's latency, VRAM and training time cannot be derived and must be measured: run `python train.py --model unet` with the final `train.py` and copy them from `results_unet2d.json` (this also gives exact U-Net Dice and IoU).
 
 What the table shows:
 - **The context module is not cheap relative to what it adds:** versus the front end alone, large context costs 2.07× the parameters, 1.99× the FLOPs, 1.75× the latency and 1.58× the inference VRAM, for +0.0016 mean Dice. This is well under the "5–10×" overhead the brief anticipates, but there is still essentially nothing to show for it.
